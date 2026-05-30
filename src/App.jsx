@@ -376,7 +376,7 @@ const Comment = ({comment, isReply=false, accent="#C0392B"}) => {
 // ════════════════════════════════════════════════════════════════════
 // HOME
 // ════════════════════════════════════════════════════════════════════
-const HomeView = ({onSelectSeason, onGoProfile, onEnroll, onGoAdmin}) => {
+const HomeView = ({onSelectSeason, onGoProfile, onEnroll, onGoAdmin, onWrapped}) => {
   const [statusFilter,setStatusFilter] = useState("todas");
   const [genreFilter,setGenreFilter]   = useState("todos");
   const [search,setSearch]             = useState("");
@@ -402,16 +402,25 @@ const HomeView = ({onSelectSeason, onGoProfile, onEnroll, onGoAdmin}) => {
     </button>
   );
 
-  const Card = ({season, feat}) => {
+  const Card = ({season}) => {
     const [hov, setHov] = useState(false);
+
+    const handleClick = () => {
+      if (season.status === "futura") return;       // travado
+      if (season.status === "encerrada") { onWrapped(season); return; }
+      onSelectSeason(season);
+    };
+
     return (
       <div
         onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
-        onClick={()=>onSelectSeason(season)}
-        style={{background:T.bg, borderBottom:`1px solid ${T.border}`,
-          display:"flex", gap:0, cursor:"pointer",
+        onClick={handleClick}
+        style={{background: hov && season.status !== "futura" ? T.surf : T.bg,
+          borderBottom:`1px solid ${T.border}`,
+          display:"flex", gap:0,
+          cursor: season.status === "futura" ? "default" : "pointer",
           transition:"background 0.15s",
-          background: hov ? T.surf : T.bg}}>
+          opacity: season.status === "futura" ? 0.55 : 1}}>
 
         {/* thumbnail */}
         <div style={{width:100, height:72, flexShrink:0, position:"relative", overflow:"hidden",
@@ -469,17 +478,26 @@ const HomeView = ({onSelectSeason, onGoProfile, onEnroll, onGoAdmin}) => {
 
         {/* ação direita */}
         <div style={{display:"flex", alignItems:"center", padding:"0 14px", flexShrink:0}}>
-          {season.status==="ativa" ? (
+          {season.status==="ativa" && (
             <button onClick={e=>{e.stopPropagation();onEnroll(season);}}
               style={{width:32, height:32, borderRadius:"50%",
                 background:"transparent", border:`1.5px solid ${T.border}`,
                 display:"flex", alignItems:"center", justifyContent:"center",
-                cursor:"pointer", fontSize:14, color:T.faint, fontFamily:T.font}}>+</button>
-          ) : (
+                cursor:"pointer", fontSize:16, color:T.faint, fontFamily:T.font}}>+</button>
+          )}
+          {season.status==="futura" && (
             <div style={{width:32, height:32, borderRadius:"50%",
               background:T.surf, border:`1.5px solid ${T.border}`,
               display:"flex", alignItems:"center", justifyContent:"center",
-              fontSize:13, color:T.faint}}>–</div>
+              fontSize:14}}>🔒</div>
+          )}
+          {season.status==="encerrada" && (
+            <button onClick={e=>{e.stopPropagation();onWrapped(season);}}
+              style={{fontSize:11, fontWeight:600, color:T.muted, background:"transparent",
+                border:`1px solid ${T.border}`, borderRadius:999, padding:"4px 10px",
+                cursor:"pointer", fontFamily:T.font, whiteSpace:"nowrap"}}>
+              Wrapped →
+            </button>
           )}
         </div>
       </div>
@@ -599,8 +617,9 @@ const HomeView = ({onSelectSeason, onGoProfile, onEnroll, onGoAdmin}) => {
 const ChapterView = ({season, onBack}) => {
   const [chapters,setChapters]   = useState(season.chapters);
   const [selectedId,setSelectedId] = useState(()=>{
-    const f=season.chapters.find(c=>c.read);
-    return f?f.id:season.chapters[0].id;
+    // abre no último capítulo lido, ou no primeiro se nenhum lido ainda
+    const read = season.chapters.filter(c=>c.read);
+    return read.length > 0 ? read[read.length-1].id : season.chapters[0].id;
   });
   const [newComment,setNewComment] = useState("");
   const [confirmUnmark,setConfirmUnmark] = useState(null);
@@ -608,10 +627,29 @@ const ChapterView = ({season, onBack}) => {
 
   const selected   = chapters.find(c=>c.id===selectedId);
   const isLocked   = !selected?.read;
-  const comments   = COMMENTS_DB[`${season.id}-${selectedId}`]||[];
+  const baseComments = COMMENTS_DB[`${season.id}-${selectedId}`]||[];
+  const [localComments, setLocalComments] = useState({});
+  const comments = [...(localComments[selectedId]||[]), ...baseComments];
   const readCount  = chapters.filter(c=>c.read).length;
   const pct        = Math.round((readCount/chapters.length)*100);
   const firstUnread = chapters.find(c=>!c.read);
+
+  const submitComment = () => {
+    if (newComment.length < 20) return;
+    const novo = {
+      id: Date.now(),
+      user: "Natalia D.", avatar: "NP", avatarBg: "#C0392B",
+      time: "agora",
+      text: newComment,
+      reactions: {"❤️":0,"😱":0,"😢":0,"🤔":0},
+      replies: [],
+    };
+    setLocalComments(prev => ({
+      ...prev,
+      [selectedId]: [novo, ...(prev[selectedId]||[])],
+    }));
+    setNewComment("");
+  };
 
   const markRead = (id)=>{
     setMarking(id);
@@ -895,6 +933,7 @@ const ChapterView = ({season, onBack}) => {
                   <Avatar initials="NP" bg="#C0392B" size={36}/>
                   <div style={{flex:1}}>
                     <textarea value={newComment} onChange={e=>setNewComment(e.target.value)}
+                      onKeyDown={e=>{if(e.key==="Enter"&&(e.metaKey||e.ctrlKey))submitComment();}}
                       placeholder="O que você achou deste capítulo? (mín. 20 caracteres)"
                       style={{width:"100%",boxSizing:"border-box",background:T.surf,
                         border:`1px solid ${T.border}`,borderRadius:T.radiusSm,
@@ -906,12 +945,12 @@ const ChapterView = ({season, onBack}) => {
                       <span style={{fontSize:12,color:newComment.length>0&&newComment.length<20?"#EF4444":T.faint}}>
                         {newComment.length}/2000{newComment.length>0&&newComment.length<20?" — mín. 20":""}
                       </span>
-                      <button disabled={newComment.length<20} style={{
+                      <button onClick={submitComment} disabled={newComment.length<20} style={{
                         background:newComment.length>=20?season.accent:"#E5E7EB",
                         border:"none",color:newComment.length>=20?"#fff":"#9CA3AF",
                         fontSize:13,fontWeight:700,padding:"8px 20px",borderRadius:999,
                         cursor:newComment.length>=20?"pointer":"default",fontFamily:T.font}}>
-                        {comments.length} COMENTÁRIOS →</button>
+                        Publicar</button>
                     </div>
                   </div>
                 </div>
@@ -2202,6 +2241,137 @@ const LoginView = ({ onLogin, onBack }) => {
 };
 
 // ════════════════════════════════════════════════════════════════════
+// WRAPPED VIEW — retrospectiva de temporada encerrada
+// ════════════════════════════════════════════════════════════════════
+const WrappedView = ({ season, onBack }) => {
+  const totalRead    = season.chapters.length;
+  const totalComments= season.comments;
+  const topTropes    = season.tropes;
+
+  const Stat = ({ emoji, value, label }) => (
+    <div style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: T.radius,
+      padding: "24px 20px", textAlign: "center" }}>
+      <div style={{ fontSize: 32, marginBottom: 8 }}>{emoji}</div>
+      <p style={{ fontSize: 32, fontWeight: 800, color: T.text, margin: "0 0 4px",
+        letterSpacing: "-0.03em" }}>{value}</p>
+      <p style={{ fontSize: 12, color: T.faint, margin: 0, textTransform: "uppercase",
+        letterSpacing: "0.06em", fontWeight: 600 }}>{label}</p>
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#FAFAFA", fontFamily: T.font, color: T.text }}>
+
+      {/* topbar */}
+      <header style={{ background: T.bg, borderBottom: `1px solid ${T.border}`,
+        padding: "0 24px", display: "flex", alignItems: "center", height: 56 }}>
+        <button onClick={onBack} style={{ background: "none", border: `1px solid ${T.border}`,
+          borderRadius: T.radiusSm, padding: "5px 12px", fontSize: 13, color: T.muted,
+          cursor: "pointer", fontFamily: T.font }}>← Voltar</button>
+      </header>
+
+      {/* hero */}
+      <div style={{ background: `linear-gradient(160deg,${season.coverA},${season.coverB})`,
+        padding: "56px 32px 48px", textAlign: "center", position: "relative" }}>
+        <div style={{ position: "absolute", inset: 0,
+          background: "linear-gradient(to bottom, rgba(0,0,0,0.1), rgba(0,0,0,0.55))" }}/>
+        <div style={{ position: "relative" }}>
+          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em",
+            textTransform: "uppercase", color: "rgba(255,255,255,0.55)", margin: "0 0 12px" }}>
+            Temporada encerrada
+          </p>
+          <h1 style={{ fontSize: 28, fontWeight: 800, color: "#fff", margin: "0 0 6px",
+            letterSpacing: "-0.02em", lineHeight: 1.1 }}>{season.title}</h1>
+          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.6)", margin: "0 0 4px",
+            fontStyle: "italic" }}>{season.author}</p>
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", margin: 0 }}>
+            {season.startDate} – {season.endDate}
+          </p>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 640, margin: "0 auto", padding: "32px 24px 64px" }}>
+
+        {/* stats */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 28 }}>
+          <Stat emoji="📖" value={totalRead} label="Capítulos"/>
+          <Stat emoji="💬" value={totalComments.toLocaleString("pt-BR")} label="Comentários"/>
+          <Stat emoji="👥" value={season.readers.toLocaleString("pt-BR")} label="Leitores"/>
+        </div>
+
+        {/* tropes */}
+        <div style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: T.radius,
+          padding: "20px", marginBottom: 16 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+            textTransform: "uppercase", color: T.faint, margin: "0 0 12px" }}>Tropes da temporada</p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {topTropes.map(t => (
+              <span key={t} style={{ fontSize: 13, fontWeight: 600, padding: "6px 14px",
+                borderRadius: 999, background: season.accentBg, color: season.accent }}>
+                {TROPE_LABELS[t]}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* comentário destaque */}
+        <div style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: T.radius,
+          padding: "20px", marginBottom: 16 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+            textTransform: "uppercase", color: T.faint, margin: "0 0 14px" }}>
+            Comentário mais curtido
+          </p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Avatar initials="DR" bg="#9B1D6A" size={36}/>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Dani Rocha</span>
+                <span style={{ fontSize: 11, color: T.faint }}>❤️ 41 reações</span>
+              </div>
+              <div style={{ background: "#FFFBEB", borderLeft: "3px solid #F59E0B",
+                borderRadius: "0 6px 6px 0", padding: "8px 12px",
+                fontSize: 13, color: "#92400E", fontFamily: "Georgia,serif",
+                fontStyle: "italic", lineHeight: 1.6 }}>
+                "Havia algo de errado com aquele olhar — era inteligente demais, humano demais para pertencer a uma fera."
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* sua participação */}
+        <div style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: T.radius,
+          padding: "20px" }}>
+          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+            textTransform: "uppercase", color: T.faint, margin: "0 0 14px" }}>
+            Sua participação
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {[
+              { label: "Capítulos lidos", value: totalRead, pct: 100 },
+              { label: "Comentários postados", value: 4, pct: null },
+            ].map((item, i) => (
+              <div key={i} style={{ background: T.surf, borderRadius: T.radiusSm,
+                padding: "14px", border: `1px solid ${T.border}` }}>
+                <p style={{ fontSize: 22, fontWeight: 800, color: T.text, margin: "0 0 2px",
+                  letterSpacing: "-0.02em" }}>{item.value}</p>
+                <p style={{ fontSize: 11, color: T.faint, margin: "0 0 8px",
+                  textTransform: "uppercase", letterSpacing: "0.05em" }}>{item.label}</p>
+                {item.pct !== null && (
+                  <div style={{ height: 3, background: "#F3F4F6", borderRadius: 999, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${item.pct}%`,
+                      background: season.accent, borderRadius: 999 }}/>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ════════════════════════════════════════════════════════════════════
 // ROOT
 // ════════════════════════════════════════════════════════════════════
 export default function CliftyApp() {
@@ -2209,21 +2379,23 @@ export default function CliftyApp() {
   const [season,setSeason]   = useState(null);
   const [enrollSeason,setEnrollSeason] = useState(null);
 
-  const goToSeason    = (s) => {setSeason(s);setView("chapter");};
-  const goHome        = ()  => {setView("home");setSeason(null);};
+  const goToSeason    = (s) => { setSeason(s); setView("chapter"); };
+  const goHome        = ()  => { setView("home"); setSeason(null); };
   const goToLanding   = ()  => setView("landing");
   const goToLogin     = ()  => setView("login");
   const goToProfile   = ()  => setView("profile");
-  const goToEnroll    = (s) => {setEnrollSeason(s);setView("enroll");};
-  const closeEnroll   = ()  => {setView("home");setEnrollSeason(null);};
-  const confirmEnroll = (s) => {setSeason(s);setView("chapter");};
+  const goToEnroll    = (s) => { setEnrollSeason(s); setView("enroll"); };
+  const closeEnroll   = ()  => { setView("home"); setEnrollSeason(null); };
+  const confirmEnroll = (s) => { setSeason(s); setView("chapter"); };
   const goToAdmin     = ()  => setView("admin");
+  const goToWrapped   = (s) => { setSeason(s); setView("wrapped"); };
 
-  if(view==="chapter"&&season)      return <ChapterView season={season} onBack={goHome}/>;
-  if(view==="profile")              return <ProfileView onBack={goHome}/>;
-  if(view==="enroll"&&enrollSeason) return <EnrollFlow season={enrollSeason} onClose={closeEnroll} onConfirm={confirmEnroll}/>;
-  if(view==="admin")                return <AdminView onBack={goHome}/>;
-  if(view==="login")                return <LoginView onLogin={goHome} onBack={goToLanding}/>;
-  if(view==="home")                 return <HomeView onSelectSeason={goToSeason} onGoProfile={goToProfile} onEnroll={goToEnroll} onGoAdmin={goToAdmin}/>;
+  if (view==="chapter" && season)       return <ChapterView season={season} onBack={goHome}/>;
+  if (view==="profile")                 return <ProfileView onBack={goHome}/>;
+  if (view==="enroll" && enrollSeason)  return <EnrollFlow season={enrollSeason} onClose={closeEnroll} onConfirm={confirmEnroll}/>;
+  if (view==="admin")                   return <AdminView onBack={goHome}/>;
+  if (view==="login")                   return <LoginView onLogin={goHome} onBack={goToLanding}/>;
+  if (view==="wrapped" && season)       return <WrappedView season={season} onBack={goHome}/>;
+  if (view==="home")                    return <HomeView onSelectSeason={goToSeason} onGoProfile={goToProfile} onEnroll={goToEnroll} onGoAdmin={goToAdmin} onWrapped={goToWrapped}/>;
   return <LandingView onEnter={goHome} onLogin={goToLogin} onGoSeason={goToSeason}/>;
 }
